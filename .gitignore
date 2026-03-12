@@ -1,0 +1,19 @@
+# 敏感配置（包含私钥、API Key、Bot Token）
+monitor_settings.json
+settings.json
+tokens.json
+transactions.json
+
+# 日志
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
