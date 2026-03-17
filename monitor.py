@@ -312,11 +312,6 @@ def analyze_token(token_address, pair_address, block_number, base_token_address,
     # 1. 代币基本信息
     info = get_token_info(token_address)
     if info:
-        # 过滤：名称或符号必须含中文字符
-        combined = info['name'] + info['symbol']
-        if not any('\u4e00' <= c <= '\u9fff' for c in combined):
-            print(f"{ts()} [跳过] {token_address} 原因: 非中文代币 (name={info['name']}, symbol={info['symbol']})")
-            return
         print(f"   名称:   {info['name']} ({info['symbol']})")
         print(f"   精度:   {info['decimals']}")
         print(f"   总供应: {info['total_supply']:,.0f}")
