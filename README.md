@@ -1,136 +1,107 @@
-# Limit Sniper
-A mempool sniping bot for Ethereum, Binance Smart Chain, Matic, &amp; Fantom that is able to scan for new liquidity adds on token launches, so as to be able to buy a token as soon as liquidity is added --> in the same block
+# MemePulse-4444
 
-*This bot was built as a learning project for me to learn how to use Web.py, Erc20, & improve my coding skills please use at your own risk!*
+MemePulse-4444 是一个面向 BSC 的 meme 币监控工具，专注于发现地址后缀为 `4444` 的新代币，并在发现后自动执行风控检查与消息通知。
 
-#### Grab the Latest Release:
-https://github.com/CryptoGnome/Limit-Sniper/releases
+它包含两部分能力：
 
-## HOW TO INSTALL Sniper Bot
-There are 3 ways to install Sniper Bot : 
+1. 链上实时监听：追踪 PancakeSwap 新交易对，分析新币安全性。
+2. 舆情辅助监听：按关键词统计社媒 KOL 宣传情况并推送报告。
 
-&nbsp;
+## 功能概览
 
+- 监听 PancakeSwap V2 新交易对（Factory `allPairsLength` 增量扫描）。
+- 过滤目标代币（支持 `4444` 后缀，或关闭后缀过滤）。
+- 支持基准币：`WBNB`、`USDT`、`USDC`。
+- 自动风控：
+	- 初始流动性阈值检查
+	- 观察期撤池检测
+	- 蜜罐/高税模拟检测
+	- LP 锁仓比例检测
+	- 合约验证状态（可选，依赖 BscScan API）
+- Telegram 实时通知。
+- 每小时价格统计：比较当前价格与上一小时价格变化。
+- Twitter 关键词/KOL 统计（`twitter_monitor.py`）。
 
-### 1. Run The Python Code Locally [*this is most ideal and can work on any OS*]
-Here is a tutorial step-by-step: 
-- [x] Download last Sniper Bot code on the "Code" page https://github.com/CryptoGnome/Limit-Sniper by clicking on Code > Download Zip: 
-<img src="https://user-images.githubusercontent.com/70858574/145568534-e22c2887-d761-4fba-8dd0-f765b4300a6c.png" width="300">
+## 风险声明
 
-- [x] Unzip file
-- [x] Install Python on your computer : https://www.python.org/downloads/ 
+本项目仅用于研究和监控，不构成投资建议。meme 币波动和风险极高，请务必自行判断并控制仓位。
 
-**PLEASE ADD IT TO PATH BY CHECKING THIS OPTION:**
+## 目录结构
 
-<img src="https://user-images.githubusercontent.com/70858574/145692350-b2cb248a-8888-4471-8a63-2b6654e9b671.png" width="500">
+```text
+.
+├── monitor.py                      # 链上监听主程序
+├── twitter_monitor.py              # 社媒/KOL 关键词监听
+├── monitor_settings.example.json   # 链上监听配置模板
+├── twitter_settings.example.json   # Twitter 配置模板
+├── requirements.txt
+├── monitor.service                 # systemd 服务（链上监听）
+├── twitter_monitor.service         # systemd 服务（Twitter监听）
+├── DEPLOYMENT.md                   # 远端部署指南
+└── QUICK_START.md                  # 快速启动指南
+```
 
-- [x] Install Visual Studio : https://visualstudio.microsoft.com/fr/thank-you-downloading-visual-studio/?sku=Community&rel=17
+## 快速开始
 
-Please install the default package and all those options :
-![image](https://user-images.githubusercontent.com/70858574/145580447-bd648d6d-c3ce-4dd9-8527-84ecfb5f30cc.png)
+1. 安装依赖
 
-- [x] Open **Windows Powershell** (or Mac Terminal on MacOs)
+```bash
+pip install -r requirements.txt
+```
 
-- [X] Run this command to locate Sniper folder : 
+2. 配置链上监听
 
-`Get-ChildItem -Filter sniper.py -Recurse -ErrorAction SilentlyContinue -Force`
+```bash
+cp monitor_settings.example.json monitor_settings.json
+```
 
-- [x] It should look like this:
+按需修改：
 
-<img src="https://user-images.githubusercontent.com/70858574/145731245-21a90bd0-7d4d-43b0-b05d-8275bedd83b3.png" width="700">
+- `ADDRESS_SUFFIX`（默认 `4444`）
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `RPC_URL`
 
-- [X] Copy the Directory 
+3. 启动链上监听
 
-(example : `C:\Users\Administrator\Desktop\Limit-Sniper-main`)
+```bash
+python3 monitor.py
+```
 
-- [X] Paste the Directory after the "cd" command to navigate through the bot folder 
+4. 启动 Twitter 监听（可选）
 
-(example : `cd C:\Users\Administrator\Desktop\Limit-Sniper-main`)
+```bash
+cp twitter_settings.example.json twitter_settings.json
+python3 twitter_monitor.py
+```
 
-<img src="https://user-images.githubusercontent.com/70858574/145731342-1d707da4-084b-41cc-b714-2e987125e07e.png" width="700">
+## 配置说明（核心项）
 
-- [x] Run command: `pip install -r requirements.txt`  --> this will install all the packages needed to run LimitSwap
+`monitor_settings.json` 关键字段：
 
-&nbsp;
+- `ADDRESS_SUFFIX`: 地址后缀过滤，空字符串代表不过滤。
+- `BASE_TOKENS`: 基准币数组（推荐保持 `WBNB/USDT/USDC`）。
+- `STARTUP_BACKFILL_PAIRS`: 启动时回溯的交易对数量。
+- `MIN_LIQUIDITY_BY_BASE`: 按基准币配置最低流动性。
+- `OBSERVE_SECONDS`: 观察撤池时间窗口（秒）。
+- `MAX_LIQUIDITY_DROP_PCT`: 观察期内允许的最大流动性下降比例。
 
-✅ ✅ ✅ And it's done! ✅ ✅ ✅
+## 服务器部署
 
-&nbsp;
+完整步骤见：`DEPLOYMENT.md`
 
-- [x] Simply **double-click on "sniper.py"** and it will run, since you've installed Python 👍👍
+简版：
 
-&nbsp;
+1. 准备 Linux VPS（Ubuntu 20.04+）。
+2. 克隆项目并安装依赖。
+3. 配置 `monitor_settings.json` / `twitter_settings.json`。
+4. 使用 `monitor.service` 和 `twitter_monitor.service` 启动并设为开机自启。
 
-#### Pros and cons
-🟢 : you are sure of the code that is running on your computer
+## 版本与分支
 
-🔴 : little bit complicated
+- 默认分支：`main`
+- 推荐通过 PR 或小步提交维护变更历史。
 
-&nbsp;
-&nbsp;
+## 许可
 
-### 2. Download the pre-compiled package [*This can lag behind current version*]
-That we provide on the Release page : it's a .exe file that you can run on your computer.
-https://github.com/CryptoGnome/Limit-Sniper/releases
-
-#### Pros and cons
-🟢 : very easy to setup
-
-🔴 : it's pre-compiled, so you cannot check the Source Code
-
-&nbsp;
-&nbsp;
-
-### 3. With Docker
-
-#### Requirements
-MacOS and Windows users require Docker for Desktop https://www.docker.com/products/docker-desktop
-Ubuntu Linux require Docker installed `sudo apt-get install docker.io`
-
-#### Usage
-Navigate into the bot directory and build the Docker image by executing the following command:
-
-`docker build -t limit_sniper .`
-
-(For MacOS and Linux) Still within the main directory you can run Docker via:
-
-`docker run --rm --name limit-sniper -it -v $(pwd)/settings.json:/app/settings.json -v $(pwd)/tokens.json:/app/tokens.json limit_sniper`
-
-(For Windows with Powershell)
-
-`docker run --rm --name limit-sniper -it -v $PWD/settings.json:/app/settings.json -v $PWD/tokens.json:/app/tokens.json limit_sniper`
-
-If you wish to run the container in the background please include -d for detached.
-
-The streaming container logs can be visualised with `docker logs -f limit_sniper`
-
-To stop the bot `docker stop limit_sniper`
-
-#### Pros and cons
-🟢 : easy to setup if you know Docker
-
-🔴 : needs Docker
-
-&nbsp;
-
-&nbsp;
-
-![alt text](https://gblobscdn.gitbook.com/assets%2F-MZTPzgUqGxiIf6m_uoa%2F-MdT8RECUAK42MnmqRTa%2F-MdT9crcWoeNiTkmhokB%2Fsniper-works.png)
-
-
-## Developers 🔧
-Want to help contribute to LimitSwap, reach out on telegram all you need to do is make changes or fix bugs and we will pay developer bounties in $LIMIT for helping make the bot batter!
-
-## Links & Socials:
-
-#### WiKi
-https://limitswapv3.gitbook.io/limitswap/
-
-#### Website:
-https://www.limitswap.com/
-
-#### Twitter:
-https://twitter.com/LimitSwap
-
-#### Telegram:
-https://t.me/LimitSwap
+仅供学习和个人研究使用。若用于生产环境，请自行完善审计、监控、容错与密钥管理。

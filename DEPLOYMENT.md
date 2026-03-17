@@ -1,4 +1,4 @@
-# Limit-Sniper 远端部署指南
+# MemePulse-4444 远端部署指南
 
 ## 系统要求
 - Linux 服务器（Ubuntu 20.04+ 或 CentOS 8+）

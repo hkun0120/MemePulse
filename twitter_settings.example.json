@@ -4,8 +4,8 @@
     "TWITTER_ACCESS_TOKEN": "your_access_token_here",
     "TWITTER_ACCESS_TOKEN_SECRET": "your_access_token_secret_here",
     "TWITTER_BEARER_TOKEN": "your_bearer_token_here",
-    "TELEGRAM_BOT_TOKEN": "8379216438:AAGQu9nWAbGYVK7y_5oMKLR5Mp7twLspugI",
-    "TELEGRAM_CHAT_ID": "6672529073",
+    "TELEGRAM_BOT_TOKEN": "your_telegram_bot_token_here",
+    "TELEGRAM_CHAT_ID": "your_telegram_chat_id_here",
     "KEYWORDS": ["4444", "Meme4444"],
     "LANGUAGES": ["zh"]
 }
