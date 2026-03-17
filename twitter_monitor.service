@@ -1,0 +1,19 @@
+[Unit]
+Description=Twitter KOL Monitor for 4444 Tokens
+After=network.target
+
+[Service]
+Type=simple
+User=limit-sniper
+WorkingDirectory=/opt/limit-sniper
+Environment="PATH=/usr/local/bin:/usr/bin"
+ExecStart=/usr/bin/python3 /opt/limit-sniper/twitter_monitor.py
+Restart=on-failure
+RestartSec=60
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

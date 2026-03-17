@@ -1,0 +1,23 @@
+[Unit]
+Description=PancakeSwap Meme Token Monitor for 4444 Address Suffix
+After=network.target
+
+[Service]
+Type=simple
+User=limit-sniper
+WorkingDirectory=/opt/limit-sniper
+Environment="PATH=/usr/local/bin:/usr/bin"
+ExecStart=/usr/bin/python3 /opt/limit-sniper/monitor.py
+Restart=on-failure
+RestartSec=60
+
+# 自动重启间隔
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
