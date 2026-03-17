@@ -11,6 +11,8 @@ import os
 import logging
 import requests
 from datetime import datetime
+import threading
+from collections import defaultdict
 
 # ─── 配置 ───────────────────────────────────────────────
 CONFIG_FILE = './monitor_settings.json'
@@ -103,6 +105,100 @@ LOCK_CONTRACTS = {
     "0x663a5c229c09b049e36dcc11a9b0d4a8eb9db214",  # DxLock
     "0xe2fe530c047f2d85298b07d9333c05d6e0aed57f",  # Team.Finance
 }
+
+# ─── 价格追踪（每小时统计） ──────────────────────────────
+discovered_coins = {}  # {token_address: {"name": "...", "symbol": "...", "pair": "...", "base": "...", "prices": [(timestamp, price)], ...}}
+coins_lock = threading.Lock()
+
+def get_token_price(token_address, base_token_address, base_symbol):
+    """通过 router 的 getAmountsOut 获取当前价格（1个base币能换多少token）"""
+    try:
+        base_symbol = base_symbol.upper()
+        buy_amount_human = TEST_BUY_AMOUNT_BY_BASE.get(base_symbol, TEST_BUY_AMOUNT_BY_BASE.get("WBNB", 0.01))
+        
+        if base_symbol == "WBNB":
+            buy_amount = Web3.to_wei(buy_amount_human, 'ether')
+        else:
+            base_decimals = get_token_decimals(base_token_address)
+            buy_amount = int(buy_amount_human * (10 ** base_decimals))
+        
+        base_token = Web3.to_checksum_address(base_token_address)
+        token = Web3.to_checksum_address(token_address)
+        
+        amounts_out = routerContract.functions.getAmountsOut(
+            buy_amount, [base_token, token]
+        ).call()
+        
+        token_decimals = get_token_decimals(token)
+        price = amounts_out[-1] / (10 ** token_decimals)  # 1个base币能换多少token
+        return price
+    except Exception as e:
+        logging.warning(f"获取价格失败 {token_address}: {e}")
+        return None
+
+
+def hourly_price_report():
+    """每小时统计一次所有已发现币的价格变化"""
+    sleep(60)  # 等待程序启动一分钟
+    while True:
+        sleep(3600)  # 每小时执行一次
+        try:
+            current_time = datetime.fromtimestamp(time())
+            with coins_lock:
+                if not discovered_coins:
+                    continue
+                
+                report_lines = [
+                    f"<b>💰 Meme 币价格统计 - {current_time.strftime('%Y-%m-%d %H:%M')}</b>",
+                    ""
+                ]
+                
+                for token_addr, coin_info in discovered_coins.items():
+                    try:
+                        price = get_token_price(token_addr, coin_info['base_addr'], coin_info['base_symbol'])
+                        if price is None:
+                            continue
+                        
+                        coin_info['prices'].append((time(), price))
+                        
+                        # 只保留最近 72 小时的价格记录
+                        cutoff_time = time() - 72 * 3600
+                        coin_info['prices'] = [(t, p) for t, p in coin_info['prices'] if t > cutoff_time]
+                        
+                        # 计算与1小时前的价格变化
+                        hour_ago = None
+                        for t, p in reversed(coin_info['prices'][:-1]):  # 除了最新的价格
+                            if time() - t >= 3600 * 0.9:  # 大约1小时前
+                                hour_ago = p
+                                break
+                        
+                        if hour_ago:
+                            change_pct = round((price - hour_ago) / hour_ago * 100, 2)
+                            change_symbol = "📈" if change_pct > 0 else "📉" if change_pct < 0 else "➡️"
+                            report_lines.append(
+                                f"{change_symbol} <b>{coin_info['name']}</b> ({coin_info['symbol']})"
+                            )
+                            report_lines.append(
+                                f"   价格: {price:.10f} | 1h 变化: <b>{change_pct:+.2f}%</b>"
+                            )
+                        else:
+                            report_lines.append(
+                                f"ℹ️ <b>{coin_info['name']}</b> ({coin_info['symbol']})"
+                            )
+                            report_lines.append(f"   价格: {price:.10f} | 数据不足1小时")
+                        
+                        report_lines.append("")
+                    except Exception as e:
+                        logging.warning(f"统计币 {token_addr} 的价格失败: {e}")
+                        continue
+                
+                if len(report_lines) > 2:  # 有数据
+                    print(f"{ts()} " + "\n{ts()} ".join(report_lines))
+                    report_lines.append("")
+                    send_telegram("\n".join(report_lines))
+        except Exception as e:
+            logging.exception(f"每小时价格统计出错: {e}")
+            print(f"{ts()} 每小时价格统计出错: {e}")
 
 # ─── 工具函数 ───────────────────────────────────────────
 
@@ -411,6 +507,23 @@ def analyze_token(token_address, pair_address, block_number, base_token_address,
 
     send_telegram("\n".join(report_lines))
     logging.info(f"分析完成: {token_address} 评分={safe_count}/{total_checks}")
+    
+    # 将发现的币加入价格追踪
+    try:
+        initial_price = get_token_price(token_address, base_token_address, base_symbol)
+        with coins_lock:
+            discovered_coins[token_address.lower()] = {
+                "name": info['name'] if info else "Unknown",
+                "symbol": info['symbol'] if info else "?",
+                "pair": pair_address,
+                "base_symbol": base_symbol,
+                "base_addr": base_token_address,
+                "discovered_at": time(),
+                "prices": [(time(), initial_price)] if initial_price else [],
+            }
+        logging.info(f"币 {token_address} 已加入价格追踪")
+    except Exception as e:
+        logging.warning(f"加入价格追踪失败 {token_address}: {e}")
 
 
 def analyze_pair_index(pair_index, block_number, is_backfill=False):
@@ -488,6 +601,12 @@ def monitor():
                 print(f"{ts()} 回溯分析出错 index={pair_index}: {e}")
         print(f"{ts()} 启动回溯完成")
         print("-" * 70)
+
+    # 启动每小时价格统计后台线程
+    price_thread = threading.Thread(target=hourly_price_report, daemon=True)
+    price_thread.start()
+    print(f"{ts()} 启动价格统计后台线程")
+    print("-" * 70)
 
     while True:
         try:
