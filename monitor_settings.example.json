@@ -2,6 +2,21 @@
     "ADDRESS_SUFFIX": "4444",
     "MIN_LIQUIDITY_BNB": 1.0,
     "POLL_INTERVAL_SECONDS": 2,
+    "OBSERVE_SECONDS": 90,
+    "MAX_LIQUIDITY_DROP_PCT": 50,
+    "MIN_LP_LOCK_PCT": 80,
+    "BASE_TOKENS": ["WBNB", "USDT", "USDC"],
+    "STARTUP_BACKFILL_PAIRS": 300,
+    "MIN_LIQUIDITY_BY_BASE": {
+        "WBNB": 1,
+        "USDT": 3000,
+        "USDC": 3000
+    },
+    "TEST_BUY_AMOUNT_BY_BASE": {
+        "WBNB": 0.01,
+        "USDT": 50,
+        "USDC": 50
+    },
     "RPC_URL": "https://bsc-dataseed1.binance.org",
     "BSCSCAN_API_KEY": "your_bscscan_api_key_here",
     "TELEGRAM_BOT_TOKEN": "your_telegram_bot_token_here",
