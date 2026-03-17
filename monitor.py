@@ -10,9 +10,10 @@ import json
 import os
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 from collections import defaultdict
+import tweepy
 
 # ─── 配置 ───────────────────────────────────────────────
 CONFIG_FILE = './monitor_settings.json'
@@ -35,6 +36,18 @@ TELEGRAM_BOT_TOKEN = config.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = config.get("TELEGRAM_CHAT_ID", "")
 RPC_URL = config.get("RPC_URL", "https://bsc-dataseed1.binance.org")
 MONITOR_ALL_NEW_TOKENS = ADDRESS_SUFFIX == ""
+
+# ─── Twitter 配置（可选）────────────────────────────────
+_TWITTER_CONFIG_FILE = './twitter_settings.json'
+TWITTER_BEARER_TOKEN = ""
+TWITTER_KEYWORDS = [ADDRESS_SUFFIX] if ADDRESS_SUFFIX else ["meme"]
+TWITTER_ENABLED = False
+if os.path.exists(_TWITTER_CONFIG_FILE):
+    with open(_TWITTER_CONFIG_FILE) as _f:
+        _tw = json.load(_f)
+    TWITTER_BEARER_TOKEN = _tw.get("TWITTER_BEARER_TOKEN", "")
+    TWITTER_KEYWORDS = _tw.get("KEYWORDS", [ADDRESS_SUFFIX] if ADDRESS_SUFFIX else ["meme"])
+    TWITTER_ENABLED = bool(TWITTER_BEARER_TOKEN)
 
 MIN_LIQUIDITY_BY_BASE = {k.upper(): float(v) for k, v in MIN_LIQUIDITY_BY_BASE.items()}
 TEST_BUY_AMOUNT_BY_BASE = {k.upper(): float(v) for k, v in TEST_BUY_AMOUNT_BY_BASE.items()}
@@ -109,6 +122,19 @@ LOCK_CONTRACTS = {
 # ─── 价格追踪（每小时统计） ──────────────────────────────
 discovered_coins = {}  # {token_address: {"name": "...", "symbol": "...", "pair": "...", "base": "...", "prices": [(timestamp, price)], ...}}
 coins_lock = threading.Lock()
+
+# ─── Twitter KOL 追踪 ───────────────────────────────────
+kol_stats = defaultdict(lambda: {
+    "user_id": "",
+    "username": "",
+    "name": "",
+    "followers": 0,
+    "tweets": [],
+    "first_mention": None,
+    "last_mention": None,
+})
+kol_stats_lock = threading.Lock()
+twitter_keywords = set(TWITTER_KEYWORDS)  # 动态更新：发现新币后自动加入其 symbol
 
 def get_token_price(token_address, base_token_address, base_symbol):
     """通过 router 的 getAmountsOut 获取当前价格（1个base币能换多少token）"""
@@ -199,6 +225,138 @@ def hourly_price_report():
         except Exception as e:
             logging.exception(f"每小时价格统计出错: {e}")
             print(f"{ts()} 每小时价格统计出错: {e}")
+
+# ─── Twitter KOL 监听 ───────────────────────────────────
+
+def get_twitter_client_v2():
+    """初始化 Twitter API v2 客户端"""
+    if not TWITTER_BEARER_TOKEN:
+        return None
+    try:
+        return tweepy.Client(bearer_token=TWITTER_BEARER_TOKEN)
+    except Exception as e:
+        logging.error(f"初始化 Twitter 客户端失败: {e}")
+        return None
+
+
+def search_tweets_v2(tw_client, keyword, max_results=100):
+    """用 Twitter API v2 搜索关键词推文"""
+    if not tw_client:
+        return []
+    try:
+        query = f'{keyword} lang:zh -is:retweet'
+        start_time = datetime.utcnow() - timedelta(days=7)
+        end_time = datetime.utcnow()
+        return tw_client.search_recent_tweets(
+            query=query,
+            max_results=min(100, max_results),
+            start_time=start_time,
+            end_time=end_time,
+            tweet_fields=['created_at', 'public_metrics', 'author_id'],
+            user_fields=['username', 'name', 'public_metrics'],
+            expansions=['author_id']
+        )
+    except Exception as e:
+        logging.warning(f"搜索推文失败 (keyword={keyword}): {e}")
+        return []
+
+
+def process_tweets(tweets_response):
+    """解析推文响应，提取 KOL 信息"""
+    if not tweets_response or not tweets_response.data:
+        return
+    user_map = {}
+    if tweets_response.includes and tweets_response.includes.get('users'):
+        for user in tweets_response.includes['users']:
+            user_map[user.id] = user
+    for tweet in tweets_response.data:
+        try:
+            user = user_map.get(tweet.author_id)
+            if not user:
+                continue
+            username = user.username
+            user_id = str(user.id)
+            tweet_time = datetime.fromisoformat(tweet.created_at.replace('Z', '+00:00'))
+            with kol_stats_lock:
+                if user_id not in kol_stats:
+                    kol_stats[user_id] = {
+                        "user_id": user_id,
+                        "username": username,
+                        "name": user.name,
+                        "followers": user.public_metrics.get('followers_count', 0),
+                        "tweets": [],
+                        "first_mention": tweet_time,
+                        "last_mention": tweet_time,
+                    }
+                else:
+                    kol_stats[user_id]['followers'] = user.public_metrics.get('followers_count', 0)
+                    kol_stats[user_id]['last_mention'] = tweet_time
+                kol_stats[user_id]['tweets'].append({
+                    "created_at": tweet.created_at,
+                    "text": tweet.text[:100] + "..." if len(tweet.text) > 100 else tweet.text,
+                    "tweet_id": tweet.id,
+                    "likes": tweet.public_metrics.get('like_count', 0),
+                    "retweets": tweet.public_metrics.get('retweet_count', 0),
+                })
+            logging.info(f"发现 KOL: @{username} ({user.name}) - 粉丝: {user.public_metrics.get('followers_count', 0)}")
+        except Exception as e:
+            logging.warning(f"处理推文出错: {e}")
+
+
+def generate_kol_report():
+    """生成并发送每小时的 KOL 宣传报告，发送后清空统计"""
+    with kol_stats_lock:
+        if not kol_stats:
+            logging.info("本小时无 KOL 宣传")
+            return
+        sorted_kols = sorted(kol_stats.items(), key=lambda x: x[1]['followers'], reverse=True)
+        kw_str = ", ".join(sorted(twitter_keywords))
+        report_lines = [
+            f"<b>📢 KOL宣传统计 - {ts().strftime('%Y-%m-%d %H:%M')}</b>",
+            f"关键词: {kw_str}",
+            f"共发现 {len(kol_stats)} 个 KOL，{sum(len(v['tweets']) for v in kol_stats.values())} 条推文",
+            ""
+        ]
+        for user_id, info in sorted_kols[:20]:
+            influence = "🔥" if info['followers'] > 100000 else "⭐" if info['followers'] > 10000 else "💬"
+            report_lines.append(f"{influence} <b>@{info['username']}</b> ({info['name']})")
+            report_lines.append(f"   粉丝: {info['followers']:,} | 推文: {len(info['tweets'])} 条")
+            if info['tweets']:
+                latest = info['tweets'][-1]
+                report_lines.append(f"   最近: {latest['text'][:60]}...")
+                report_lines.append(f"   互动: ❤️ {latest['likes']} 🔄 {latest['retweets']}")
+            report_lines.append("")
+        report_lines.append("")
+        send_telegram("\n".join(report_lines))
+        logging.info(f"已发送 KOL 报告，KOL数={len(kol_stats)}")
+        kol_stats.clear()
+
+
+def twitter_hourly_monitor():
+    """Twitter KOL 监听后台线程，每小时扫描关键词并发送报告"""
+    sleep(120)  # 等待主程序稳定启动
+    while True:
+        try:
+            current_keywords = list(twitter_keywords)
+            print(f"\n{ts()} [Twitter] 开始扫描, 关键词: {current_keywords}")
+            tw_client = get_twitter_client_v2()
+            if not tw_client:
+                print(f"{ts()} [Twitter] 客户端初始化失败，300秒后重试")
+                sleep(300)
+                continue
+            for keyword in current_keywords:
+                print(f"{ts()} [Twitter] 搜索: {keyword}")
+                resp = search_tweets_v2(tw_client, keyword)
+                process_tweets(resp)
+                sleep(2)  # 避免超出 API 速率限制
+            generate_kol_report()
+            print(f"{ts()} [Twitter] 本轮完成，等待1小时")
+            sleep(3600)
+        except Exception as e:
+            logging.exception(f"Twitter 监听出错: {e}")
+            print(f"{ts()} [Twitter] 出错: {e}，300秒后重试")
+            sleep(300)
+
 
 # ─── 工具函数 ───────────────────────────────────────────
 
@@ -522,6 +680,10 @@ def analyze_token(token_address, pair_address, block_number, base_token_address,
                 "prices": [(time(), initial_price)] if initial_price else [],
             }
         logging.info(f"币 {token_address} 已加入价格追踪")
+        # 将代币 symbol 加入 Twitter 监听关键词（自动覆盖新发现的币）
+        if info and info.get('symbol'):
+            twitter_keywords.add(info['symbol'])
+            logging.info(f"symbol={info['symbol']} 已加入 Twitter 监听关键词")
     except Exception as e:
         logging.warning(f"加入价格追踪失败 {token_address}: {e}")
 
@@ -606,6 +768,14 @@ def monitor():
     price_thread = threading.Thread(target=hourly_price_report, daemon=True)
     price_thread.start()
     print(f"{ts()} 启动价格统计后台线程")
+
+    # 启动 Twitter KOL 监听后台线程（需配置 twitter_settings.json）
+    if TWITTER_ENABLED:
+        twitter_thread = threading.Thread(target=twitter_hourly_monitor, daemon=True)
+        twitter_thread.start()
+        print(f"{ts()} 启动 Twitter KOL 监听后台线程，初始关键词: {list(twitter_keywords)}")
+    else:
+        print(f"{ts()} Twitter 监听未启用 (未配置 twitter_settings.json 或缺少 TWITTER_BEARER_TOKEN)")
     print("-" * 70)
 
     while True:
